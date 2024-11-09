@@ -1,33 +1,24 @@
-import json
+import os
 import queue
 import re
-import requests
 import telebot
 import threading
 import time
 
-bot = telebot.TeleBot('')
+from haystack_integrations.components.generators.ollama import OllamaGenerator
+
+bot = telebot.TeleBot(os.getenv('TELEGRAM_TOKEN'))
 
 @bot.message_handler(content_types=['text'])
 def ask_model(message):
-    model_response = requests.post('http://localhost:11434/api/generate', stream=True, json={
-        'model': 'llama3.2:3b',
-        'prompt': message.text
-    })
-
     message_queue = queue.Queue()
 
+    generator = OllamaGenerator(model='llama3.2:3b', streaming_callback=lambda x: message_queue.put((x.content, False)))
+
     threading.Thread(target=send_message_stream_async, args=[message_queue, message.chat.id]).start()
-
-    for response_stream in model_response.iter_lines():
-        if not response_stream:
-            continue
-        
-        response_stream = response_stream.decode('utf-8')
-        response_stream = json.loads(response_stream).get('response')
-
-        message_queue.put((response_stream, False))
     
+    generator.run(message.text)
+
     message_queue.put(('', True))
 
 def send_message_stream_async(message_queue, chat_id, message_id = None, message_text = ''):
