@@ -5,9 +5,42 @@ import telebot
 import threading
 import time
 
+from haystack import Pipeline
+from haystack.components.converters import TikaDocumentConverter
+from haystack.components.fetchers import LinkContentFetcher
+from haystack.components.preprocessors import DocumentCleaner
+from haystack.components.preprocessors import DocumentSplitter
+from haystack.document_stores.in_memory import InMemoryDocumentStore
+from haystack.document_stores.types import DuplicatePolicy
+from haystack.components.writers import DocumentWriter
+
+from haystack_integrations.components.embedders.ollama import OllamaDocumentEmbedder
 from haystack_integrations.components.generators.ollama import OllamaGenerator
 
 bot = telebot.TeleBot(os.getenv('TELEGRAM_TOKEN'))
+
+@bot.message_handler(content_types=['document'])
+def generate_embeddings(message):
+    document_store = InMemoryDocumentStore(embedding_similarity_function='cosine')
+
+    pipeline = Pipeline()
+
+    pipeline.add_component('fetcher', LinkContentFetcher())
+    pipeline.add_component('converter', TikaDocumentConverter())
+    pipeline.add_component('cleaner', DocumentCleaner())
+    pipeline.add_component('splitter', DocumentSplitter(split_by='sentence', split_length=5))
+    pipeline.add_component('embedder', OllamaDocumentEmbedder())
+    pipeline.add_component('writer', DocumentWriter(document_store=document_store, policy=DuplicatePolicy.OVERWRITE))
+
+    pipeline.connect('fetcher.streams', 'converter.sources')
+    pipeline.connect('converter', 'cleaner')
+    pipeline.connect('cleaner', 'splitter')
+    pipeline.connect('splitter', 'embedder')
+    pipeline.connect('embedder', 'writer')
+
+    pipeline.run({'fetcher': {'urls': [bot.get_file_url(message.document.file_id)]}})
+
+    bot.send_message(message.chat.id, 'Arquivo processado!')
 
 @bot.message_handler(content_types=['text'])
 def ask_model(message):
