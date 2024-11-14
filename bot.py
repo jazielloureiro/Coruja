@@ -28,10 +28,10 @@ def generate_embeddings(message):
     pipeline = Pipeline()
 
     pipeline.add_component('fetcher', LinkContentFetcher())
-    pipeline.add_component('converter', TikaDocumentConverter())
+    pipeline.add_component('converter', TikaDocumentConverter(tika_url=os.getenv('TIKA_URL')))
     pipeline.add_component('cleaner', DocumentCleaner())
     pipeline.add_component('splitter', DocumentSplitter(split_by='sentence', split_length=5))
-    pipeline.add_component('embedder', OllamaDocumentEmbedder())
+    pipeline.add_component('embedder', OllamaDocumentEmbedder(url=os.getenv('OLLAMA_URL')))
     pipeline.add_component('writer', DocumentWriter(document_store=document_store, policy=DuplicatePolicy.OVERWRITE))
 
     pipeline.connect('fetcher.streams', 'converter.sources')
@@ -61,10 +61,10 @@ def ask_model(message):
     Question: {{ query }}?
     """
 
-    pipeline.add_component('text_embedder', OllamaTextEmbedder())
+    pipeline.add_component('text_embedder', OllamaTextEmbedder(url=os.getenv('OLLAMA_URL')))
     pipeline.add_component('retriever', InMemoryEmbeddingRetriever(document_store=document_store))
     pipeline.add_component('prompt_builder', PromptBuilder(template=template))
-    pipeline.add_component('llm', OllamaGenerator(model='llama3.2:3b', streaming_callback=lambda x: message_queue.put((x.content, False))))
+    pipeline.add_component('llm', OllamaGenerator(model='llama3.2:3b', url=os.getenv('OLLAMA_URL'), streaming_callback=lambda x: message_queue.put((x.content, False))))
 
     pipeline.connect('text_embedder.embedding', 'retriever.query_embedding')
     pipeline.connect('retriever', 'prompt_builder.documents')
