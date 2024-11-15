@@ -23,7 +23,7 @@ from haystack_integrations.document_stores.pgvector import PgvectorDocumentStore
 
 bot = telebot.TeleBot(os.getenv('TELEGRAM_TOKEN'))
 
-connection_string = f'postgresql://{os.getenv('POSTGRES_USER')}:{os.getenv('POSTGRES_PASSWORD')}@{os.getenv('POSTGRES_URL')}/{os.getenv('POSTGRES_DB')}'
+connection_string = f"postgresql://{os.getenv('POSTGRES_USER')}:{os.getenv('POSTGRES_PASSWORD')}@{os.getenv('POSTGRES_URL')}/{os.getenv('POSTGRES_DB')}"
 
 document_store = PgvectorDocumentStore(connection_string=Secret.from_token(connection_string))
 
