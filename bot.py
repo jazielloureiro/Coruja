@@ -11,17 +11,21 @@ from haystack.components.converters import TikaDocumentConverter
 from haystack.components.fetchers import LinkContentFetcher
 from haystack.components.preprocessors import DocumentCleaner
 from haystack.components.preprocessors import DocumentSplitter
-from haystack.components.retrievers import InMemoryEmbeddingRetriever
-from haystack.document_stores.in_memory import InMemoryDocumentStore
-from haystack.document_stores.types import DuplicatePolicy
 from haystack.components.writers import DocumentWriter
+from haystack.document_stores.types import DuplicatePolicy
+from haystack.utils import Secret
 
 from haystack_integrations.components.embedders.ollama import OllamaDocumentEmbedder
 from haystack_integrations.components.embedders.ollama import OllamaTextEmbedder
 from haystack_integrations.components.generators.ollama import OllamaGenerator
+from haystack_integrations.components.retrievers.pgvector import PgvectorEmbeddingRetriever
+from haystack_integrations.document_stores.pgvector import PgvectorDocumentStore
 
 bot = telebot.TeleBot(os.getenv('TELEGRAM_TOKEN'))
-document_store = InMemoryDocumentStore(embedding_similarity_function='cosine')
+
+connection_string = f'postgresql://{os.getenv('POSTGRES_USER')}:{os.getenv('POSTGRES_PASSWORD')}@{os.getenv('POSTGRES_URL')}/{os.getenv('POSTGRES_DB')}'
+
+document_store = PgvectorDocumentStore(connection_string=Secret.from_token(connection_string))
 
 @bot.message_handler(content_types=['document'])
 def generate_embeddings(message):
@@ -62,7 +66,7 @@ def ask_model(message):
     """
 
     pipeline.add_component('text_embedder', OllamaTextEmbedder(url=os.getenv('OLLAMA_URL')))
-    pipeline.add_component('retriever', InMemoryEmbeddingRetriever(document_store=document_store))
+    pipeline.add_component('retriever', PgvectorEmbeddingRetriever(document_store=document_store))
     pipeline.add_component('prompt_builder', PromptBuilder(template=template))
     pipeline.add_component('llm', OllamaGenerator(model='llama3.2:3b', url=os.getenv('OLLAMA_URL'), streaming_callback=lambda x: message_queue.put((x.content, False))))
 
