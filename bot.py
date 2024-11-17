@@ -36,8 +36,6 @@ bot.setup_middleware(StateMiddleware(bot))
 
 connection_string = f'postgresql://{os.getenv('POSTGRES_USER')}:{os.getenv('POSTGRES_PASSWORD')}@{os.getenv('POSTGRES_URL')}/{os.getenv('POSTGRES_DB')}'
 
-document_store = PgvectorDocumentStore(connection_string=Secret.from_token(connection_string))
-
 class States(StatesGroup):
     chatbot_menu = State()
     chatbot_ask_for_token = State()
@@ -70,17 +68,20 @@ def ask_for_new_chatbot_token(callback_query: types.CallbackQuery, state: StateC
 
 @bot.message_handler(state=States.chatbot_ask_for_token, content_types=['text'])
 def register_chatbot(message: types.Message, state: StateContext):
-    client_bot = TeleBot(message.text)
+    child_bot = TeleBot(message.text)
 
-    bot_information = client_bot.get_me()
+    bot_information = child_bot.get_me()
 
     with psycopg.connect(connection_string) as connection:
         with connection.cursor() as cursor:
             cursor.execute('INSERT INTO chatbot (token, name, username) VALUES (%s, %s, %s)', (message.text, bot_information.first_name, bot_information.username))
             
             connection.commit()
-    
-    client_bot.send_message(message.from_user.id, 'Hey')
+
+    child_bot.register_message_handler(ask_model, content_types=['text'], pass_bot=True)
+
+    threading.Thread(target=child_bot.infinity_polling).start()
+
     state.set(States.chatbot_registered)
 
 @bot.callback_query_handler(state=States.chatbot_menu)
@@ -117,7 +118,7 @@ def generate_embeddings(message: types.Message, state: StateContext):
 
     pipeline = Pipeline()
 
-    document_store = PgvectorDocumentStore(connection_string=Secret.from_token(connection_string), table_name=chatbot_username)
+    document_store = PgvectorDocumentStore(connection_string=Secret.from_token(connection_string), table_name=f'document_{chatbot_username}')
 
     pipeline.add_component('fetcher', LinkContentFetcher())
     pipeline.add_component('converter', TikaDocumentConverter(tika_url=os.getenv('TIKA_URL')))
@@ -146,11 +147,14 @@ def generate_embeddings(message: types.Message, state: StateContext):
 
     bot.send_message(message.chat.id, 'Arquivo processado!')
 
-@bot.message_handler(content_types=['text'])
-def ask_model(message):
+def ask_model(message: types.Message, bot: TeleBot):
     message_queue = queue.Queue()
 
     pipeline = Pipeline()
+
+    bot_information = bot.get_me()
+
+    document_store = PgvectorDocumentStore(connection_string=Secret.from_token(connection_string), table_name=f'document_{bot_information.username}')
 
     template = """
     Given the following documents, answer the question.
@@ -172,13 +176,13 @@ def ask_model(message):
     pipeline.connect('retriever', 'prompt_builder.documents')
     pipeline.connect('prompt_builder', 'llm')
 
-    threading.Thread(target=send_message_stream_async, args=[message_queue, message.chat.id]).start()
+    threading.Thread(target=send_message_stream_async, args=[message_queue, bot, message.chat.id]).start()
     
     pipeline.run({'prompt_builder': {'query': message.text}, 'text_embedder': {'text': message.text}})
 
     message_queue.put(('', True))
 
-def send_message_stream_async(message_queue, chat_id, message_id = None, message_text = ''):
+def send_message_stream_async(message_queue, bot, chat_id, message_id = None, message_text = ''):
     stream_end = False
 
     while not stream_end:
