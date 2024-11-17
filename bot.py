@@ -18,6 +18,8 @@ from haystack_integrations.components.generators.ollama import OllamaGenerator
 from haystack_integrations.components.retrievers.pgvector import PgvectorEmbeddingRetriever
 from haystack_integrations.document_stores.pgvector import PgvectorDocumentStore
 
+import psycopg
+
 from telebot import custom_filters, TeleBot, types, util
 from telebot.states import State, StatesGroup
 from telebot.states.sync.context import StateContext
@@ -37,11 +39,12 @@ connection_string = f'postgresql://{os.getenv('POSTGRES_USER')}:{os.getenv('POST
 document_store = PgvectorDocumentStore(connection_string=Secret.from_token(connection_string))
 
 class States(StatesGroup):
-    chatbots_menu = State()
+    chatbot_menu = State()
+    chatbot_register = State()
 
 @bot.message_handler(commands=['start', 'chatbots'])
 def send_chatbots_menu(message: types.Message, state: StateContext):
-    state.set(States.chatbots_menu)
+    state.set(States.chatbot_menu)
 
     inline_keyboard = util.quick_markup({
         '\U0001F4BE Novo': { 'callback_data': 'new_chatbot' },
@@ -50,9 +53,25 @@ def send_chatbots_menu(message: types.Message, state: StateContext):
 
     bot.send_message(message.chat.id, 'Chatbots', reply_markup=inline_keyboard)
 
-@bot.callback_query_handler(state=States.chatbots_menu)
+@bot.callback_query_handler(state=States.chatbot_menu, func=lambda x: x.data == 'new_chatbot')
 def handle_chatbots_menu_action(callback_query: types.CallbackQuery, state: StateContext):
-    bot.send_message(callback_query.message.chat.id, callback_query.data)
+    state.set(States.chatbot_register)
+
+    bot.send_message(callback_query.message.chat.id, 'Token?')
+
+@bot.message_handler(state=States.chatbot_register, content_types=['text'])
+def register_chatbot(message: types.Message, state: StateContext):
+    client_bot = TeleBot(message.text)
+
+    bot_information = client_bot.get_me()
+
+    with psycopg.connect(connection_string) as connection:
+        with connection.cursor() as cursor:
+            cursor.execute('INSERT INTO chatbot (token, name, username) VALUES (%s, %s, %s)', (message.text, bot_information.first_name, bot_information.username))
+            
+            connection.commit()
+    
+    client_bot.send_message(message.from_user.id, 'Hey')
 
 @bot.message_handler(content_types=['document'])
 def generate_embeddings(message):
