@@ -40,7 +40,10 @@ document_store = PgvectorDocumentStore(connection_string=Secret.from_token(conne
 
 class States(StatesGroup):
     chatbot_menu = State()
-    chatbot_register = State()
+    chatbot_ask_for_token = State()
+    chatbot_registered = State()
+    resource_menu = State()
+    chatbot_ask_for_resource = State()
 
 @bot.message_handler(commands=['start', 'chatbots'])
 def send_chatbots_menu(message: types.Message, state: StateContext):
@@ -50,22 +53,22 @@ def send_chatbots_menu(message: types.Message, state: StateContext):
 
     with psycopg.connect(connection_string) as connection:
         with connection.cursor() as cursor:
-            cursor.execute('SELECT name, username FROM chatbot ORDER BY name')
+            cursor.execute('SELECT id, name FROM chatbot ORDER BY name')
 
-            for name, username in cursor:
-                keyboard_data[f'\U0001F916 {name}'] = { 'callback_data': f'chatbot_{username}' }
+            for id, name in cursor:
+                keyboard_data[f'\U0001F916 {name}'] = { 'callback_data': f'{id}_{name}' }
 
     inline_keyboard = util.quick_markup(keyboard_data, row_width=1)
 
     bot.send_message(message.chat.id, 'Chatbots', reply_markup=inline_keyboard)
 
 @bot.callback_query_handler(state=States.chatbot_menu, func=lambda x: x.data == 'new_chatbot')
-def handle_chatbots_menu_action(callback_query: types.CallbackQuery, state: StateContext):
-    state.set(States.chatbot_register)
+def ask_for_new_chatbot_token(callback_query: types.CallbackQuery, state: StateContext):
+    state.set(States.chatbot_ask_for_token)
 
     bot.send_message(callback_query.message.chat.id, 'Token?')
 
-@bot.message_handler(state=States.chatbot_register, content_types=['text'])
+@bot.message_handler(state=States.chatbot_ask_for_token, content_types=['text'])
 def register_chatbot(message: types.Message, state: StateContext):
     client_bot = TeleBot(message.text)
 
@@ -78,6 +81,32 @@ def register_chatbot(message: types.Message, state: StateContext):
             connection.commit()
     
     client_bot.send_message(message.from_user.id, 'Hey')
+    state.set(States.chatbot_registered)
+
+@bot.callback_query_handler(state=States.chatbot_menu)
+def send_resources_menu(callback_query: types.CallbackQuery, state: StateContext):
+    state.set(States.resource_menu)
+
+    chatbot_id, chatbot_name = callback_query.data.split('_')
+
+    keyboard_data = {'\U0001F4BE Novo': { 'callback_data': 'new_resource' }}
+
+    with psycopg.connect(connection_string) as connection:
+        with connection.cursor() as cursor:
+            cursor.execute('SELECT name FROM resource WHERE chatbot_id = %s ORDER BY name', (chatbot_id,))
+
+            for name, in cursor:
+                keyboard_data[f'\U0001F4DA {name}'] = { 'callback_data': f'resource_{name}' }
+
+    inline_keyboard = util.quick_markup(keyboard_data, row_width=1)
+
+    bot.send_message(callback_query.message.chat.id, chatbot_name, reply_markup=inline_keyboard)
+
+@bot.callback_query_handler(state=States.resource_menu, func=lambda x: x.data == 'new_resource')
+def ask_for_new_chatbot_token(callback_query: types.CallbackQuery, state: StateContext):
+    state.set(States.chatbot_ask_for_resource)
+
+    bot.send_message(callback_query.message.chat.id, 'Resource?')
 
 @bot.message_handler(content_types=['document'])
 def generate_embeddings(message):
