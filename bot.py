@@ -43,20 +43,20 @@ class States(StatesGroup):
     chatbot_ask_for_token = State()
     chatbot_registered = State()
     resource_menu = State()
-    chatbot_ask_for_resource = State()
+    ask_for_resource = State()
 
 @bot.message_handler(commands=['start', 'chatbots'])
 def send_chatbots_menu(message: types.Message, state: StateContext):
     state.set(States.chatbot_menu)
 
-    keyboard_data = {'\U0001F4BE Novo': { 'callback_data': 'new_chatbot' }}
+    keyboard_data = {'\U0001F4BE Novo': {'callback_data': 'new_chatbot'}}
 
     with psycopg.connect(connection_string) as connection:
         with connection.cursor() as cursor:
-            cursor.execute('SELECT id, name FROM chatbot ORDER BY name')
+            cursor.execute('SELECT id, name, username FROM chatbot ORDER BY name')
 
-            for id, name in cursor:
-                keyboard_data[f'\U0001F916 {name}'] = { 'callback_data': f'{id}_{name}' }
+            for id, name, username in cursor:
+                keyboard_data[f'\U0001F916 {name}'] = {'callback_data': f'{id}_{name}_{username}'}
 
     inline_keyboard = util.quick_markup(keyboard_data, row_width=1)
 
@@ -87,30 +87,37 @@ def register_chatbot(message: types.Message, state: StateContext):
 def send_resources_menu(callback_query: types.CallbackQuery, state: StateContext):
     state.set(States.resource_menu)
 
-    chatbot_id, chatbot_name = callback_query.data.split('_')
+    chatbot_id, chatbot_name, chatbot_username = callback_query.data.split('_')
+
+    state.add_data(chatbot_menu=(chatbot_id, chatbot_username))
 
     keyboard_data = {'\U0001F4BE Novo': { 'callback_data': 'new_resource' }}
 
     with psycopg.connect(connection_string) as connection:
         with connection.cursor() as cursor:
-            cursor.execute('SELECT name FROM resource WHERE chatbot_id = %s ORDER BY name', (chatbot_id,))
+            cursor.execute('SELECT id, name FROM resource WHERE chatbot_id = %s ORDER BY name', (chatbot_id,))
 
-            for name, in cursor:
-                keyboard_data[f'\U0001F4DA {name}'] = { 'callback_data': f'resource_{name}' }
+            for id, name in cursor:
+                keyboard_data[f'\U0001F4DA {name}'] = { 'callback_data': f'resource_{id}' }
 
     inline_keyboard = util.quick_markup(keyboard_data, row_width=1)
 
     bot.send_message(callback_query.message.chat.id, chatbot_name, reply_markup=inline_keyboard)
 
 @bot.callback_query_handler(state=States.resource_menu, func=lambda x: x.data == 'new_resource')
-def ask_for_new_chatbot_token(callback_query: types.CallbackQuery, state: StateContext):
-    state.set(States.chatbot_ask_for_resource)
+def ask_for_new_resource(callback_query: types.CallbackQuery, state: StateContext):
+    state.set(States.ask_for_resource)
 
     bot.send_message(callback_query.message.chat.id, 'Resource?')
 
-@bot.message_handler(content_types=['document'])
-def generate_embeddings(message):
+@bot.message_handler(state=States.ask_for_resource, content_types=['document'])
+def generate_embeddings(message: types.Message, state: StateContext):
+    with state.data() as data:
+        chatbot_id, chatbot_username = data.get('chatbot_menu')
+
     pipeline = Pipeline()
+
+    document_store = PgvectorDocumentStore(connection_string=Secret.from_token(connection_string), table_name=chatbot_username)
 
     pipeline.add_component('fetcher', LinkContentFetcher())
     pipeline.add_component('converter', TikaDocumentConverter(tika_url=os.getenv('TIKA_URL')))
@@ -125,7 +132,17 @@ def generate_embeddings(message):
     pipeline.connect('splitter', 'embedder')
     pipeline.connect('embedder', 'writer')
 
-    pipeline.run({'fetcher': {'urls': [bot.get_file_url(message.document.file_id)]}})
+    documents = pipeline.run({'fetcher': {'urls': [bot.get_file_url(message.document.file_id)]}}, include_outputs_from=set(['splitter']))
+
+    with psycopg.connect(connection_string) as connection:
+        with connection.cursor() as cursor:
+            cursor.execute('INSERT INTO resource (chatbot_id, name) VALUES (%s, %s) RETURNING id', (chatbot_id, message.document.file_name))
+            
+            resource_id, = cursor.fetchone()
+
+            cursor.executemany('INSERT INTO resource_document (resource_id, document_id) VALUES (%s, %s)', [(resource_id, i.id) for i in documents['splitter']['documents']])
+
+            connection.commit()
 
     bot.send_message(message.chat.id, 'Arquivo processado!')
 
