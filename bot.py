@@ -46,10 +46,16 @@ class States(StatesGroup):
 def send_chatbots_menu(message: types.Message, state: StateContext):
     state.set(States.chatbot_menu)
 
-    inline_keyboard = util.quick_markup({
-        '\U0001F4BE Novo': { 'callback_data': 'new_chatbot' },
-        '\U0001F916 Chatbot': { 'callback_data': 'cb1' },
-    }, row_width=1)
+    keyboard_data = {'\U0001F4BE Novo': { 'callback_data': 'new_chatbot' }}
+
+    with psycopg.connect(connection_string) as connection:
+        with connection.cursor() as cursor:
+            cursor.execute('SELECT name, username FROM chatbot ORDER BY name')
+
+            for name, username in cursor:
+                keyboard_data[f'\U0001F916 {name}'] = { 'callback_data': f'chatbot_{username}' }
+
+    inline_keyboard = util.quick_markup(keyboard_data, row_width=1)
 
     bot.send_message(message.chat.id, 'Chatbots', reply_markup=inline_keyboard)
 
