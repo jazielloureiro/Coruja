@@ -1,7 +1,6 @@
 import os
 import queue
 import re
-import telebot
 import threading
 import time
 
@@ -9,23 +8,51 @@ from haystack import Pipeline
 from haystack.components.builders.prompt_builder import PromptBuilder
 from haystack.components.converters import TikaDocumentConverter
 from haystack.components.fetchers import LinkContentFetcher
-from haystack.components.preprocessors import DocumentCleaner
-from haystack.components.preprocessors import DocumentSplitter
+from haystack.components.preprocessors import DocumentCleaner, DocumentSplitter
 from haystack.components.writers import DocumentWriter
 from haystack.document_stores.types import DuplicatePolicy
 from haystack.utils import Secret
 
-from haystack_integrations.components.embedders.ollama import OllamaDocumentEmbedder
-from haystack_integrations.components.embedders.ollama import OllamaTextEmbedder
+from haystack_integrations.components.embedders.ollama import OllamaDocumentEmbedder, OllamaTextEmbedder
 from haystack_integrations.components.generators.ollama import OllamaGenerator
 from haystack_integrations.components.retrievers.pgvector import PgvectorEmbeddingRetriever
 from haystack_integrations.document_stores.pgvector import PgvectorDocumentStore
 
-bot = telebot.TeleBot(os.getenv('TELEGRAM_TOKEN'))
+from telebot import custom_filters, TeleBot, types, util
+from telebot.states import State, StatesGroup
+from telebot.states.sync.context import StateContext
+from telebot.states.sync.middleware import StateMiddleware
+from telebot.storage import StateMemoryStorage
+
+state_storage = StateMemoryStorage()
+
+bot = TeleBot(os.getenv('TELEGRAM_TOKEN'), state_storage=state_storage, use_class_middlewares=True)
+
+bot.add_custom_filter(custom_filters.StateFilter(bot))
+
+bot.setup_middleware(StateMiddleware(bot))
 
 connection_string = f'postgresql://{os.getenv('POSTGRES_USER')}:{os.getenv('POSTGRES_PASSWORD')}@{os.getenv('POSTGRES_URL')}/{os.getenv('POSTGRES_DB')}'
 
 document_store = PgvectorDocumentStore(connection_string=Secret.from_token(connection_string))
+
+class States(StatesGroup):
+    chatbots_menu = State()
+
+@bot.message_handler(commands=['start', 'chatbots'])
+def send_chatbots_menu(message: types.Message, state: StateContext):
+    state.set(States.chatbots_menu)
+
+    inline_keyboard = util.quick_markup({
+        '\U0001F4BE Novo': { 'callback_data': 'new_chatbot' },
+        '\U0001F916 Chatbot': { 'callback_data': 'cb1' },
+    }, row_width=1)
+
+    bot.send_message(message.chat.id, 'Chatbots', reply_markup=inline_keyboard)
+
+@bot.callback_query_handler(state=States.chatbots_menu)
+def handle_chatbots_menu_action(callback_query: types.CallbackQuery, state: StateContext):
+    bot.send_message(callback_query.message.chat.id, callback_query.data)
 
 @bot.message_handler(content_types=['document'])
 def generate_embeddings(message):
