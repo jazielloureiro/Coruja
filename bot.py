@@ -118,7 +118,7 @@ def generate_embeddings(message: types.Message, state: StateContext):
 
     pipeline = Pipeline()
 
-    document_store = PgvectorDocumentStore(connection_string=Secret.from_token(connection_string), table_name=f'document_{chatbot_username}')
+    document_store = PgvectorDocumentStore(connection_string=Secret.from_token(connection_string), table_name=f'document_{chatbot_username}', keyword_index_name=f'{chatbot_username}_index')
 
     pipeline.add_component('fetcher', LinkContentFetcher())
     pipeline.add_component('converter', TikaDocumentConverter(tika_url=os.getenv('TIKA_URL')))
@@ -154,7 +154,7 @@ def ask_model(message: types.Message, bot: TeleBot):
 
     bot_information = bot.get_me()
 
-    document_store = PgvectorDocumentStore(connection_string=Secret.from_token(connection_string), table_name=f'document_{bot_information.username}')
+    document_store = PgvectorDocumentStore(connection_string=Secret.from_token(connection_string), table_name=f'document_{bot_information.username}', keyword_index_name=f'{bot_information.username}_index')
 
     template = """
     Given the following documents, answer the question.
