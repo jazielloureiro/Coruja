@@ -1,4 +1,5 @@
 import os
+import pickle
 import queue
 import re
 import threading
@@ -20,32 +21,89 @@ from haystack_integrations.document_stores.pgvector import PgvectorDocumentStore
 
 import psycopg
 
-from telebot import custom_filters, TeleBot, types, util
-from telebot.states import State, StatesGroup
-from telebot.states.sync.context import StateContext
-from telebot.states.sync.middleware import StateMiddleware
-from telebot.storage import StateMemoryStorage
+from telebot import TeleBot, types, util
+from telebot.handler_backends import BaseMiddleware
+from telebot.custom_filters import AdvancedCustomFilter
+from telebot.util import update_types
 
-state_storage = StateMemoryStorage()
+from transitions import Machine
 
-bot = TeleBot(os.getenv('TELEGRAM_TOKEN'), state_storage=state_storage, use_class_middlewares=True)
+import valkey
 
-bot.add_custom_filter(custom_filters.StateFilter(bot))
+vk = valkey.Valkey(host='valkey', port=6379, db=0)
+
+class MainBotMachine():
+    states = ['chatbot_menu', 'chatbot_ask_for_token', 'chatbot_registered', 'resource_menu', 'ask_for_resource']
+
+    def __init__(self, bot, chat_id):
+        self.bot = bot
+        self.chat_id = chat_id
+
+        self.machine = Machine(model=self, states=self.states, initial='chatbot_menu', after_state_change='persist')
+
+        self.child_bot_id = None
+        self.child_bot_username = None
+    
+    def persist(self):
+        vk.set(f'state_{self.bot}_{self.chat_id}', pickle.dumps(self))
+
+class StateMiddleware(BaseMiddleware):
+    def __init__(self, bot: TeleBot):
+        self.bot = bot
+        self.update_types = update_types
+
+    def pre_process(self, message: types.Message | types.CallbackQuery, data):
+        if isinstance(message, types.CallbackQuery):
+            chat_id = message.message.chat.id
+        else:
+            chat_id = message.chat.id
+
+        state = vk.get(f'state_{self.bot.user.username}_{chat_id}')
+
+        if state:
+            state = pickle.loads(state)
+        else:
+            state = MainBotMachine(self.bot.user.username, chat_id)
+            state.persist()
+        
+        data['state'] = state
+
+    def post_process(self, message, data, exception):
+        pass
+
+class StateFilter(AdvancedCustomFilter):
+    key = 'state'
+
+    def __init__(self, bot: TeleBot):
+        self.bot = bot
+
+    def check(self, message, text):
+        if isinstance(message, types.CallbackQuery):
+            chat_id = message.message.chat.id
+        else:
+            chat_id = message.chat.id
+
+        state = vk.get(f'state_{self.bot.user.username}_{chat_id}')
+
+        if state:
+            state = pickle.loads(state)
+        else:
+            state = MainBotMachine(self.bot.user.username, chat_id)
+            state.persist()
+
+        return state.state == text
+
+bot = TeleBot(os.getenv('TELEGRAM_TOKEN'), use_class_middlewares=True)
+
+bot.add_custom_filter(StateFilter(bot))
 
 bot.setup_middleware(StateMiddleware(bot))
 
 connection_string = f'postgresql://{os.getenv('POSTGRES_USER')}:{os.getenv('POSTGRES_PASSWORD')}@{os.getenv('POSTGRES_URL')}/{os.getenv('POSTGRES_DB')}'
 
-class States(StatesGroup):
-    chatbot_menu = State()
-    chatbot_ask_for_token = State()
-    chatbot_registered = State()
-    resource_menu = State()
-    ask_for_resource = State()
-
 @bot.message_handler(commands=['start', 'chatbots'])
-def send_chatbots_menu(message: types.Message, state: StateContext):
-    state.set(States.chatbot_menu)
+def send_chatbots_menu(message: types.Message, state: MainBotMachine):
+    state.to_chatbot_menu()
 
     keyboard_data = {'\U0001F4BE Novo': {'callback_data': 'new_chatbot'}}
 
@@ -60,14 +118,14 @@ def send_chatbots_menu(message: types.Message, state: StateContext):
 
     bot.send_message(message.chat.id, 'Chatbots', reply_markup=inline_keyboard)
 
-@bot.callback_query_handler(state=States.chatbot_menu, func=lambda x: x.data == 'new_chatbot')
-def ask_for_new_chatbot_token(callback_query: types.CallbackQuery, state: StateContext):
-    state.set(States.chatbot_ask_for_token)
+@bot.callback_query_handler(state='chatbot_menu', func=lambda x: x.data == 'new_chatbot')
+def ask_for_new_chatbot_token(callback_query: types.CallbackQuery, state: MainBotMachine):
+    state.to_chatbot_ask_for_token()
 
     bot.send_message(callback_query.message.chat.id, 'Token?')
 
-@bot.message_handler(state=States.chatbot_ask_for_token, content_types=['text'])
-def register_chatbot(message: types.Message, state: StateContext):
+@bot.message_handler(state='chatbot_ask_for_token', content_types=['text'])
+def register_chatbot(message: types.Message, state: MainBotMachine):
     child_bot = TeleBot(message.text)
 
     bot_information = child_bot.get_me()
@@ -82,15 +140,17 @@ def register_chatbot(message: types.Message, state: StateContext):
 
     threading.Thread(target=child_bot.infinity_polling).start()
 
-    state.set(States.chatbot_registered)
+    state.to_chatbot_registered()
 
-@bot.callback_query_handler(state=States.chatbot_menu)
-def send_resources_menu(callback_query: types.CallbackQuery, state: StateContext):
-    state.set(States.resource_menu)
+@bot.callback_query_handler(state='chatbot_menu')
+def send_resources_menu(callback_query: types.CallbackQuery, state: MainBotMachine):
+    state.to_resource_menu()
 
     chatbot_id, chatbot_name, chatbot_username = callback_query.data.split('_')
 
-    state.add_data(chatbot_menu=(chatbot_id, chatbot_username))
+    state.child_bot_id = chatbot_id
+    state.child_bot_username = chatbot_username
+    state.persist()
 
     keyboard_data = {'\U0001F4BE Novo': { 'callback_data': 'new_resource' }}
 
@@ -105,20 +165,17 @@ def send_resources_menu(callback_query: types.CallbackQuery, state: StateContext
 
     bot.send_message(callback_query.message.chat.id, chatbot_name, reply_markup=inline_keyboard)
 
-@bot.callback_query_handler(state=States.resource_menu, func=lambda x: x.data == 'new_resource')
-def ask_for_new_resource(callback_query: types.CallbackQuery, state: StateContext):
-    state.set(States.ask_for_resource)
+@bot.callback_query_handler(state='resource_menu', func=lambda x: x.data == 'new_resource')
+def ask_for_new_resource(callback_query: types.CallbackQuery, state: MainBotMachine):
+    state.to_ask_for_resource()
 
     bot.send_message(callback_query.message.chat.id, 'Resource?')
 
-@bot.message_handler(state=States.ask_for_resource, content_types=['document'])
-def generate_embeddings(message: types.Message, state: StateContext):
-    with state.data() as data:
-        chatbot_id, chatbot_username = data.get('chatbot_menu')
-
+@bot.message_handler(state='ask_for_resource', content_types=['document'])
+def generate_embeddings(message: types.Message, state: MainBotMachine):
     pipeline = Pipeline()
 
-    document_store = PgvectorDocumentStore(connection_string=Secret.from_token(connection_string), table_name=f'document_{chatbot_username}', keyword_index_name=f'{chatbot_username}_index')
+    document_store = PgvectorDocumentStore(connection_string=Secret.from_token(connection_string), table_name=f'document_{state.child_bot_username}', keyword_index_name=f'{state.child_bot_username}_index')
 
     pipeline.add_component('fetcher', LinkContentFetcher())
     pipeline.add_component('converter', TikaDocumentConverter(tika_url=os.getenv('TIKA_URL')))
@@ -137,7 +194,7 @@ def generate_embeddings(message: types.Message, state: StateContext):
 
     with psycopg.connect(connection_string) as connection:
         with connection.cursor() as cursor:
-            cursor.execute('INSERT INTO resource (chatbot_id, name) VALUES (%s, %s) RETURNING id', (chatbot_id, message.document.file_name))
+            cursor.execute('INSERT INTO resource (chatbot_id, name) VALUES (%s, %s) RETURNING id', (state.child_bot_id, message.document.file_name))
             
             resource_id, = cursor.fetchone()
 

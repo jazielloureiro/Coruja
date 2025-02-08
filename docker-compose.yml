@@ -10,6 +10,7 @@ services:
       - ollama
       - postgres
       - tika
+      - valkey
     restart: always
 
   ollama:
@@ -32,4 +33,8 @@ services:
     build:
       context: .
       dockerfile: tika.Dockerfile
+    restart: always
+  
+  valkey:
+    image: valkey/valkey:8
     restart: always
