@@ -170,7 +170,7 @@ def ask_model(message: types.Message, bot: TeleBot):
     pipeline.add_component('text_embedder', OllamaTextEmbedder(url=os.getenv('OLLAMA_URL')))
     pipeline.add_component('retriever', PgvectorEmbeddingRetriever(document_store=document_store))
     pipeline.add_component('prompt_builder', PromptBuilder(template=template))
-    pipeline.add_component('llm', OllamaGenerator(model='llama3.2:3b', url=os.getenv('OLLAMA_URL'), streaming_callback=lambda x: message_queue.put((x.content, False))))
+    pipeline.add_component('llm', OllamaGenerator(model='llama3.2:3b', url=os.getenv('OLLAMA_URL'), raw=True, keep_alive=-1, streaming_callback=lambda x: message_queue.put((x.content, False))))
 
     pipeline.connect('text_embedder.embedding', 'retriever.query_embedding')
     pipeline.connect('retriever', 'prompt_builder.documents')
