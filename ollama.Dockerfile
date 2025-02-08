@@ -1,4 +1,4 @@
-FROM ollama/ollama:0.4.1
+FROM ollama/ollama:0.5.7
 
 RUN <<EOF
 ollama serve &
