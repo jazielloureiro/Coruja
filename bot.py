@@ -28,9 +28,9 @@ from telebot.util import update_types
 
 from transitions import Machine
 
-import valkey
+from storage.connection.valkey import ValkeyConnection
 
-vk = valkey.Valkey(host='valkey', port=6379, db=0)
+vk = ValkeyConnection()
 
 class MainBotMachine():
     states = ['chatbot_menu', 'chatbot_ask_for_token', 'chatbot_registered', 'resource_menu', 'ask_for_resource']
@@ -45,7 +45,7 @@ class MainBotMachine():
         self.child_bot_username = None
     
     def persist(self):
-        vk.set(f'state_{self.bot}_{self.chat_id}', pickle.dumps(self))
+        vk().set(f'state_{self.bot}_{self.chat_id}', pickle.dumps(self))
 
 class StateMiddleware(BaseMiddleware):
     def __init__(self, bot: TeleBot):
@@ -58,7 +58,7 @@ class StateMiddleware(BaseMiddleware):
         else:
             chat_id = message.chat.id
 
-        state = vk.get(f'state_{self.bot.user.username}_{chat_id}')
+        state = vk().get(f'state_{self.bot.user.username}_{chat_id}')
 
         if state:
             state = pickle.loads(state)
@@ -83,7 +83,7 @@ class StateFilter(AdvancedCustomFilter):
         else:
             chat_id = message.chat.id
 
-        state = vk.get(f'state_{self.bot.user.username}_{chat_id}')
+        state = vk().get(f'state_{self.bot.user.username}_{chat_id}')
 
         if state:
             state = pickle.loads(state)
