@@ -19,8 +19,6 @@ from haystack_integrations.components.generators.ollama import OllamaGenerator
 from haystack_integrations.components.retrievers.pgvector import PgvectorEmbeddingRetriever
 from haystack_integrations.document_stores.pgvector import PgvectorDocumentStore
 
-import psycopg
-
 from telebot import TeleBot, types, util
 from telebot.handler_backends import BaseMiddleware
 from telebot.custom_filters import AdvancedCustomFilter
@@ -28,8 +26,9 @@ from telebot.util import update_types
 
 from transitions import Machine
 
-from storage.connection.valkey import ValkeyConnection
+from storage.connection import PostgresConnection, ValkeyConnection
 
+pg = PostgresConnection()
 vk = ValkeyConnection()
 
 class MainBotMachine():
@@ -107,12 +106,11 @@ def send_chatbots_menu(message: types.Message, state: MainBotMachine):
 
     keyboard_data = {'\U0001F4BE Novo': {'callback_data': 'new_chatbot'}}
 
-    with psycopg.connect(connection_string) as connection:
-        with connection.cursor() as cursor:
-            cursor.execute('SELECT id, name, username FROM chatbot ORDER BY name')
+    with pg().cursor() as cursor:
+        cursor.execute('SELECT id, name, username FROM chatbot ORDER BY name')
 
-            for id, name, username in cursor:
-                keyboard_data[f'\U0001F916 {name}'] = {'callback_data': f'{id}_{name}_{username}'}
+        for id, name, username in cursor:
+            keyboard_data[f'\U0001F916 {name}'] = {'callback_data': f'{id}_{name}_{username}'}
 
     inline_keyboard = util.quick_markup(keyboard_data, row_width=1)
 
@@ -130,11 +128,8 @@ def register_chatbot(message: types.Message, state: MainBotMachine):
 
     bot_information = child_bot.get_me()
 
-    with psycopg.connect(connection_string) as connection:
-        with connection.cursor() as cursor:
-            cursor.execute('INSERT INTO chatbot (token, name, username) VALUES (%s, %s, %s)', (message.text, bot_information.first_name, bot_information.username))
-            
-            connection.commit()
+    with pg().cursor() as cursor:
+        cursor.execute('INSERT INTO chatbot (token, name, username) VALUES (%s, %s, %s)', (message.text, bot_information.first_name, bot_information.username))
 
     child_bot.register_message_handler(ask_model, content_types=['text'], pass_bot=True)
 
@@ -154,12 +149,11 @@ def send_resources_menu(callback_query: types.CallbackQuery, state: MainBotMachi
 
     keyboard_data = {'\U0001F4BE Novo': { 'callback_data': 'new_resource' }}
 
-    with psycopg.connect(connection_string) as connection:
-        with connection.cursor() as cursor:
-            cursor.execute('SELECT id, name FROM resource WHERE chatbot_id = %s ORDER BY name', (chatbot_id,))
+    with pg().cursor() as cursor:
+        cursor.execute('SELECT id, name FROM resource WHERE chatbot_id = %s ORDER BY name', (chatbot_id,))
 
-            for id, name in cursor:
-                keyboard_data[f'\U0001F4DA {name}'] = { 'callback_data': f'resource_{id}' }
+        for id, name in cursor:
+            keyboard_data[f'\U0001F4DA {name}'] = { 'callback_data': f'resource_{id}' }
 
     inline_keyboard = util.quick_markup(keyboard_data, row_width=1)
 
@@ -192,15 +186,14 @@ def generate_embeddings(message: types.Message, state: MainBotMachine):
 
     documents = pipeline.run({'fetcher': {'urls': [bot.get_file_url(message.document.file_id)]}}, include_outputs_from=set(['splitter']))
 
-    with psycopg.connect(connection_string) as connection:
-        with connection.cursor() as cursor:
-            cursor.execute('INSERT INTO resource (chatbot_id, name) VALUES (%s, %s) RETURNING id', (state.child_bot_id, message.document.file_name))
-            
-            resource_id, = cursor.fetchone()
+    with pg().cursor() as cursor:
+        cursor.execute('INSERT INTO resource (chatbot_id, name) VALUES (%s, %s) RETURNING id', (state.child_bot_id, message.document.file_name))
+        
+        resource_id, = cursor.fetchone()
 
-            cursor.executemany('INSERT INTO resource_document (resource_id, document_id) VALUES (%s, %s)', [(resource_id, i.id) for i in documents['splitter']['documents']])
+        cursor.executemany('INSERT INTO resource_document (resource_id, document_id) VALUES (%s, %s)', [(resource_id, i.id) for i in documents['splitter']['documents']])
 
-            connection.commit()
+        pg().commit()
 
     bot.send_message(message.chat.id, 'Arquivo processado!')
 

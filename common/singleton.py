@@ -8,7 +8,10 @@ class Singleton(type):
         if not cls in cls._instances:
             cls._lock.acquire()
 
-            if not cls in cls._instances:
-                cls._instances[cls] = super().__call__(*args, **kwargs)
+            try:
+                if not cls in cls._instances:
+                    cls._instances[cls] = super().__call__(*args, **kwargs)
+            finally:
+                cls._lock.release()
         
         return cls._instances[cls]
