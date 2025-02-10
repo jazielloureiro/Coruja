@@ -25,14 +25,16 @@ from telebot.util import update_types
 
 from transitions import Machine
 
-from entities import ChatState
+from entities import ChatState, Chatbot
 
-from storage import ChatStateStorage
+from storage import ChatStateStorage, ChatbotStorage
 
 from storage.connection import PostgresConnection
 
 pg = PostgresConnection()
+
 chat_state_storage = ChatStateStorage()
+chatbot_storage = ChatbotStorage()
 
 class MainBotMachine(ChatState):
     def __init__(self, bot_username, chat_id):
@@ -102,11 +104,10 @@ def send_chatbots_menu(message: types.Message, state: MainBotMachine):
 
     keyboard_data = {'\U0001F4BE Novo': {'callback_data': 'new_chatbot'}}
 
-    with pg().cursor() as cursor:
-        cursor.execute('SELECT id, name, username FROM chatbot ORDER BY name')
+    chatbots = chatbot_storage.find_all()
 
-        for id, name, username in cursor:
-            keyboard_data[f'\U0001F916 {name}'] = {'callback_data': f'{id}_{name}_{username}'}
+    for i in chatbots:
+        keyboard_data[f'\U0001F916 {i.name}'] = {'callback_data': f'{i.id}_{i.name}_{i.username}'}
 
     inline_keyboard = util.quick_markup(keyboard_data, row_width=1)
 
@@ -124,8 +125,7 @@ def register_chatbot(message: types.Message, state: MainBotMachine):
 
     bot_information = child_bot.get_me()
 
-    with pg().cursor() as cursor:
-        cursor.execute('INSERT INTO chatbot (token, name, username) VALUES (%s, %s, %s)', (message.text, bot_information.first_name, bot_information.username))
+    chatbot_storage.save(Chatbot(token=message.text, name=bot_information.first_name, username=bot_information.username))
 
     child_bot.register_message_handler(ask_model, content_types=['text'], pass_bot=True)
 

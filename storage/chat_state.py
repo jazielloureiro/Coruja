@@ -1,6 +1,6 @@
 import pickle
 
-from entities.chat_state import ChatState
+from entities import ChatState
 
 from .connection import ValkeyConnection
 
