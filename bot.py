@@ -1,5 +1,4 @@
 import os
-import pickle
 import queue
 import re
 import threading
@@ -26,25 +25,26 @@ from telebot.util import update_types
 
 from transitions import Machine
 
-from storage.connection import PostgresConnection, ValkeyConnection
+from entities.chat_state import ChatState
+
+from storage import ChatStateStorage
+
+from storage.connection import PostgresConnection
 
 pg = PostgresConnection()
-vk = ValkeyConnection()
+chat_state_storage = ChatStateStorage()
 
-class MainBotMachine():
-    states = ['chatbot_menu', 'chatbot_ask_for_token', 'chatbot_registered', 'resource_menu', 'ask_for_resource']
-
-    def __init__(self, bot, chat_id):
-        self.bot = bot
+class MainBotMachine(ChatState):
+    def __init__(self, bot_username, chat_id):
+        self.bot_username = bot_username
         self.chat_id = chat_id
 
-        self.machine = Machine(model=self, states=self.states, initial='chatbot_menu', after_state_change='persist')
+        self._states = ['chatbot_menu', 'chatbot_ask_for_token', 'chatbot_registered', 'resource_menu', 'ask_for_resource']
 
-        self.child_bot_id = None
-        self.child_bot_username = None
+        self._machine = Machine(model=self, states=self._states, initial='chatbot_menu', after_state_change='persist')
     
     def persist(self):
-        vk().set(f'state_{self.bot}_{self.chat_id}', pickle.dumps(self))
+        chat_state_storage.save(self)
 
 class StateMiddleware(BaseMiddleware):
     def __init__(self, bot: TeleBot):
@@ -57,11 +57,9 @@ class StateMiddleware(BaseMiddleware):
         else:
             chat_id = message.chat.id
 
-        state = vk().get(f'state_{self.bot.user.username}_{chat_id}')
+        state = chat_state_storage.find(self.bot.user.username, chat_id)
 
-        if state:
-            state = pickle.loads(state)
-        else:
+        if not state:
             state = MainBotMachine(self.bot.user.username, chat_id)
             state.persist()
         
@@ -82,11 +80,9 @@ class StateFilter(AdvancedCustomFilter):
         else:
             chat_id = message.chat.id
 
-        state = vk().get(f'state_{self.bot.user.username}_{chat_id}')
+        state = chat_state_storage.find(self.bot.user.username, chat_id)
 
-        if state:
-            state = pickle.loads(state)
-        else:
+        if not state:
             state = MainBotMachine(self.bot.user.username, chat_id)
             state.persist()
 
