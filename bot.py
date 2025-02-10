@@ -25,7 +25,7 @@ from telebot.util import update_types
 
 from transitions import Machine
 
-from entities.chat_state import ChatState
+from entities import ChatState
 
 from storage import ChatStateStorage
 
