@@ -2,6 +2,6 @@ from dataclasses import dataclass
 
 @dataclass()
 class Resource:
-    id: int
-    chatbot_id: int
-    name: str
+    id: int = 0
+    chatbot_id: int = 0
+    name: str = ''

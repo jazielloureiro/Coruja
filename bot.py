@@ -25,9 +25,9 @@ from telebot.util import update_types
 
 from transitions import Machine
 
-from entities import ChatState, Chatbot
+from entities import ChatState, Chatbot, Resource
 
-from storage import ChatStateStorage, ChatbotStorage
+from storage import ChatStateStorage, ChatbotStorage, ResourceStorage
 
 from storage.connection import PostgresConnection
 
@@ -35,6 +35,7 @@ pg = PostgresConnection()
 
 chat_state_storage = ChatStateStorage()
 chatbot_storage = ChatbotStorage()
+resource_storage = ResourceStorage()
 
 class MainBotMachine(ChatState):
     def __init__(self, bot_username, chat_id):
@@ -145,11 +146,10 @@ def send_resources_menu(callback_query: types.CallbackQuery, state: MainBotMachi
 
     keyboard_data = {'\U0001F4BE Novo': { 'callback_data': 'new_resource' }}
 
-    with pg().cursor() as cursor:
-        cursor.execute('SELECT id, name FROM resource WHERE chatbot_id = %s ORDER BY name', (chatbot_id,))
+    resources = resource_storage.find(chatbot_id)
 
-        for id, name in cursor:
-            keyboard_data[f'\U0001F4DA {name}'] = { 'callback_data': f'resource_{id}' }
+    for i in resources:
+        keyboard_data[f'\U0001F4DA {i.name}'] = { 'callback_data': f'resource_{i.id}' }
 
     inline_keyboard = util.quick_markup(keyboard_data, row_width=1)
 
@@ -183,13 +183,9 @@ def generate_embeddings(message: types.Message, state: MainBotMachine):
     documents = pipeline.run({'fetcher': {'urls': [bot.get_file_url(message.document.file_id)]}}, include_outputs_from=set(['splitter']))
 
     with pg().cursor() as cursor:
-        cursor.execute('INSERT INTO resource (chatbot_id, name) VALUES (%s, %s) RETURNING id', (state.child_bot_id, message.document.file_name))
-        
-        resource_id, = cursor.fetchone()
+        resource_id = resource_storage.save(Resource(chatbot_id=state.child_bot_id, name=message.document.file_name))
 
         cursor.executemany('INSERT INTO resource_document (resource_id, document_id) VALUES (%s, %s)', [(resource_id, i.id) for i in documents['splitter']['documents']])
-
-        pg().commit()
 
     bot.send_message(message.chat.id, 'Arquivo processado!')
 
