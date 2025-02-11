@@ -25,16 +25,13 @@ from telebot.util import update_types
 
 from transitions import Machine
 
-from entities import ChatState, Chatbot, Resource
+from entities import ChatState, Chatbot, ResourceDocument, Resource
 
-from storage import ChatStateStorage, ChatbotStorage, ResourceStorage
-
-from storage.connection import PostgresConnection
-
-pg = PostgresConnection()
+from storage import ChatStateStorage, ChatbotStorage, ResourceDocumentStorage, ResourceStorage
 
 chat_state_storage = ChatStateStorage()
 chatbot_storage = ChatbotStorage()
+resource_document_storage = ResourceDocumentStorage()
 resource_storage = ResourceStorage()
 
 class MainBotMachine(ChatState):
@@ -182,10 +179,9 @@ def generate_embeddings(message: types.Message, state: MainBotMachine):
 
     documents = pipeline.run({'fetcher': {'urls': [bot.get_file_url(message.document.file_id)]}}, include_outputs_from=set(['splitter']))
 
-    with pg().cursor() as cursor:
-        resource_id = resource_storage.save(Resource(chatbot_id=state.child_bot_id, name=message.document.file_name))
+    resource_id = resource_storage.save(Resource(chatbot_id=state.child_bot_id, name=message.document.file_name))
 
-        cursor.executemany('INSERT INTO resource_document (resource_id, document_id) VALUES (%s, %s)', [(resource_id, i.id) for i in documents['splitter']['documents']])
+    resource_document_storage.save_many([ResourceDocument(resource_id, i.id) for i in documents['splitter']['documents']])
 
     bot.send_message(message.chat.id, 'Arquivo processado!')
 
