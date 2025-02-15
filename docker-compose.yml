@@ -11,6 +11,9 @@ services:
       - postgres
       - tika
       - valkey
+    command: ["sh", "-c", "pip install debugpy -t /tmp && python /tmp/debugpy --wait-for-client --listen 0.0.0.0:5678 bot.py"]
+    ports:
+      - 5678:5678
     restart: always
 
   ollama:
@@ -24,9 +27,9 @@ services:
     volumes:
       - ./database/:/docker-entrypoint-initdb.d/
     environment:
-    - POSTGRES_DB=${POSTGRES_DB}
-    - POSTGRES_PASSWORD=${POSTGRES_PASSWORD}
-    - POSTGRES_USER=${POSTGRES_USER}
+      - POSTGRES_DB=${POSTGRES_DB}
+      - POSTGRES_PASSWORD=${POSTGRES_PASSWORD}
+      - POSTGRES_USER=${POSTGRES_USER}
     restart: always
 
   tika:
