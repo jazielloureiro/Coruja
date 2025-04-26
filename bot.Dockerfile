@@ -1,14 +1,16 @@
-FROM python:3.12
+FROM python:3.13
 
 WORKDIR /app
 
-COPY requirements.txt .
+RUN pip install pipenv
 
-RUN pip install -r requirements.txt
+COPY Pipfile Pipfile.lock ./
+
+RUN pipenv install
 
 COPY ./common ./common
 COPY ./entities ./entities
 COPY ./storage ./storage
 COPY ./bot.py .
 
-CMD ["python", "bot.py"]
+CMD ["pipenv", "run", "python", "bot.py"]
