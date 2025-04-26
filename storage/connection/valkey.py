@@ -2,7 +2,7 @@ from os import getenv
 
 from valkey import Valkey
 
-from common.singleton import Singleton
+from common import Singleton
 
 class ValkeyConnection(metaclass=Singleton):
     def __init__(self):

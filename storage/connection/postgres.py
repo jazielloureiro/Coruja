@@ -2,7 +2,7 @@ from os import getenv
 
 from psycopg import connect
 
-from common.singleton import Singleton
+from common import Singleton
 
 class PostgresConnection(metaclass=Singleton):
     def __init__(self):
