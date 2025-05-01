@@ -10,7 +10,8 @@ RUN pipenv install
 
 COPY ./common ./common
 COPY ./entities ./entities
-COPY ./storage ./storage
+COPY ./repositories ./repositories
+COPY ./services ./services
 COPY ./bot.py .
 
 CMD ["pipenv", "run", "python", "bot.py"]
