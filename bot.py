@@ -27,6 +27,8 @@ from transitions import Machine
 
 from entities import ChatState, Chatbot, ResourceDocument, Resource
 
+from services import ChatbotService
+
 from repositories import ValkeyChatStateRepository, PostgresChatbotRepository, PostgresResourceDocumentRepository, PostgresResourceRepository
 
 chat_state_repository = ValkeyChatStateRepository()
@@ -100,9 +102,10 @@ connection_string = f'postgresql://{os.getenv('POSTGRES_USER')}:{os.getenv('POST
 def send_chatbots_menu(message: types.Message, state: MainBotMachine):
     state.to_chatbot_menu()
 
-    keyboard_data = {'\U0001F4BE Novo': {'callback_data': 'new_chatbot'}}
+    chatbot_service = ChatbotService(chatbot_repository)
+    chatbots = chatbot_service.list_chatbots()
 
-    chatbots = chatbot_repository.find_all()
+    keyboard_data = {'\U0001F4BE Novo': {'callback_data': 'new_chatbot'}}
 
     for i in chatbots:
         keyboard_data[f'\U0001F916 {i.name}'] = {'callback_data': f'{i.id}_{i.name}_{i.username}'}

@@ -1,8 +1,19 @@
+from abc import ABC, abstractmethod
+
 from entities import Chatbot
 
 from .connection import PostgresConnection
 
-class PostgresChatbotRepository():
+class ChatbotRepositoryABC(ABC):
+    @abstractmethod
+    def find_all(self) -> list[Chatbot]:
+        ...
+    
+    @abstractmethod
+    def save(self, chatbot: Chatbot) -> None:
+        ...
+
+class PostgresChatbotRepository(ChatbotRepositoryABC):
     def __init__(self):
         self._connection = PostgresConnection()
     
