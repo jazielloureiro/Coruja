@@ -1,8 +1,8 @@
 from entities import Resource
 
-from .connection.postgres import PostgresConnection
+from .connection import PostgresConnection
 
-class ResourceStorage:
+class PostgresResourceRepository:
     def __init__(self):
         self._connection = PostgresConnection()
     

@@ -27,12 +27,12 @@ from transitions import Machine
 
 from entities import ChatState, Chatbot, ResourceDocument, Resource
 
-from storage import ChatStateStorage, ChatbotStorage, ResourceDocumentStorage, ResourceStorage
+from repositories import ValkeyChatStateRepository, PostgresChatbotRepository, PostgresResourceDocumentRepository, PostgresResourceRepository
 
-chat_state_storage = ChatStateStorage()
-chatbot_storage = ChatbotStorage()
-resource_document_storage = ResourceDocumentStorage()
-resource_storage = ResourceStorage()
+chat_state_repository = ValkeyChatStateRepository()
+chatbot_repository = PostgresChatbotRepository()
+resource_document_repository = PostgresResourceDocumentRepository()
+resource_repository = PostgresResourceRepository()
 
 class MainBotMachine(ChatState):
     def __init__(self, bot_username, chat_id):
@@ -44,7 +44,7 @@ class MainBotMachine(ChatState):
         self._machine = Machine(model=self, states=self._states, initial='chatbot_menu', after_state_change='persist')
     
     def persist(self):
-        chat_state_storage.save(self)
+        chat_state_repository.save(self)
 
 class StateMiddleware(BaseMiddleware):
     def __init__(self, bot: TeleBot):
@@ -57,7 +57,7 @@ class StateMiddleware(BaseMiddleware):
         else:
             chat_id = message.chat.id
 
-        state = chat_state_storage.find(self.bot.user.username, chat_id)
+        state = chat_state_repository.find(self.bot.user.username, chat_id)
 
         if not state:
             state = MainBotMachine(self.bot.user.username, chat_id)
@@ -80,7 +80,7 @@ class StateFilter(AdvancedCustomFilter):
         else:
             chat_id = message.chat.id
 
-        state = chat_state_storage.find(self.bot.user.username, chat_id)
+        state = chat_state_repository.find(self.bot.user.username, chat_id)
 
         if not state:
             state = MainBotMachine(self.bot.user.username, chat_id)
@@ -102,7 +102,7 @@ def send_chatbots_menu(message: types.Message, state: MainBotMachine):
 
     keyboard_data = {'\U0001F4BE Novo': {'callback_data': 'new_chatbot'}}
 
-    chatbots = chatbot_storage.find_all()
+    chatbots = chatbot_repository.find_all()
 
     for i in chatbots:
         keyboard_data[f'\U0001F916 {i.name}'] = {'callback_data': f'{i.id}_{i.name}_{i.username}'}
@@ -123,7 +123,7 @@ def register_chatbot(message: types.Message, state: MainBotMachine):
 
     bot_information = child_bot.get_me()
 
-    chatbot_storage.save(Chatbot(token=message.text, name=bot_information.first_name, username=bot_information.username))
+    chatbot_repository.save(Chatbot(token=message.text, name=bot_information.first_name, username=bot_information.username))
 
     child_bot.register_message_handler(ask_model, content_types=['text'], pass_bot=True)
 
@@ -143,7 +143,7 @@ def send_resources_menu(callback_query: types.CallbackQuery, state: MainBotMachi
 
     keyboard_data = {'\U0001F4BE Novo': { 'callback_data': 'new_resource' }}
 
-    resources = resource_storage.find(chatbot_id)
+    resources = resource_repository.find(chatbot_id)
 
     for i in resources:
         keyboard_data[f'\U0001F4DA {i.name}'] = { 'callback_data': f'resource_{i.id}' }
@@ -179,9 +179,9 @@ def generate_embeddings(message: types.Message, state: MainBotMachine):
 
     documents = pipeline.run({'fetcher': {'urls': [bot.get_file_url(message.document.file_id)]}}, include_outputs_from=set(['splitter']))
 
-    resource_id = resource_storage.save(Resource(chatbot_id=state.child_bot_id, name=message.document.file_name))
+    resource_id = resource_repository.save(Resource(chatbot_id=state.child_bot_id, name=message.document.file_name))
 
-    resource_document_storage.save_many([ResourceDocument(resource_id, i.id) for i in documents['splitter']['documents']])
+    resource_document_repository.save_many([ResourceDocument(resource_id, i.id) for i in documents['splitter']['documents']])
 
     bot.send_message(message.chat.id, 'Arquivo processado!')
 

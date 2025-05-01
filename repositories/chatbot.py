@@ -2,7 +2,7 @@ from entities import Chatbot
 
 from .connection import PostgresConnection
 
-class ChatbotStorage():
+class PostgresChatbotRepository():
     def __init__(self):
         self._connection = PostgresConnection()
     

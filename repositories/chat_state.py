@@ -4,7 +4,7 @@ from entities import ChatState
 
 from .connection import ValkeyConnection
 
-class ChatStateStorage:
+class ValkeyChatStateRepository:
     def __init__(self):
         self._connection = ValkeyConnection()
     

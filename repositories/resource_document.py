@@ -1,8 +1,8 @@
 from entities import ResourceDocument
 
-from .connection.postgres import PostgresConnection
+from .connection import PostgresConnection
 
-class ResourceDocumentStorage:
+class PostgresResourceDocumentRepository:
     def __init__(self):
         self._connection = PostgresConnection()
     
